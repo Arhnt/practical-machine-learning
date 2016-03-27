@@ -1,0 +1,82 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Viktor Z"
+date: "March 20, 2016"
+output: html_document
+---
+
+```{r echo=FALSE, message=FALSE}
+library(caret)
+```
+# Executive Summary
+Random Forest model provides extremely high accuracy when solving classification problem how well person performs sport activity.
+
+# Data
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Loading data
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har
+```{r}
+training <- read.csv("pml-training.csv", stringsAsFactors = FALSE)
+testing <- read.csv("pml-testing.csv", stringsAsFactors = FALSE)
+```
+
+Our model shouldn't be dependent on time and user attributes, so lets skip them.
+Also set classe attribute to be factor, and all other variables as numeric.
+```{r warning=FALSE}
+training <- subset(training, select = -c(X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window))
+training$classe <- factor(training$classe)
+for(i in 1:152) training[,i] <- as.numeric(training[,i])
+
+testing <- subset(testing, select = -c(X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window))
+for(i in 1:152) testing[,i] <- as.numeric(testing[,i])
+```
+
+### Data partitioning
+Because there is no *classe* in testing data, I split training data to three training and testing.
+```{r}
+indexes <- createDataPartition(training$classe, p = 0.7, list = F)
+subsetTesting <- training[-indexes, ]
+subsetTraining <- training[indexes, ]
+data.frame(training = dim(subsetTraining), testing = dim(subsetTesting))
+```
+
+## Exploration
+All classes have enough observations, I can use simple accuracy metric.
+```{r}
+qplot(subsetTraining$classe, xlab = "Classe", main = "Classe Histogram")
+```
+
+During date loading I saw a lot of N/A values, lets take a closer look on them.
+```{r}
+qplot(x, y, data = data.frame(y = sort(apply(is.na(subsetTraining), 2, sum)), x = seq_along(colnames(subsetTraining))), xlab = "Variables", ylab = "Observations with Null values", main = "Unused variables")
+```
+
+Significant part of observations have only `r sum(apply(is.na(subsetTraining), 2, sum) == 0) - 1` variables. Lets check classes in observations  (`r sum(apply(is.na(subsetTraining), 1, sum) < 53)`) with non null variables to see any patterns.
+```{r}
+df <- data.frame(y = apply(is.na(subsetTraining[apply(is.na(subsetTraining), 1, sum) < 53, ]), 1, sum), classe = subsetTraining[apply(is.na(subsetTraining), 1, sum) < 53, 153], x = seq_along(subsetTraining[apply(is.na(subsetTraining), 1, sum) < 53, 153]))
+qplot(x, y, data = df, colour = classe, xlab = "Sequence", ylab = "# of null variables")
+```
+
+I dont't see any pattern in class - number of null variables, so lets skip those predictors for now, latter we can use them to build separate models for different cases and combine them.
+```{r}
+nullVars <- apply(is.na(subsetTraining), 2, any)
+```
+
+# Building model
+I use Random Forest as one of most accurate models for classification problem
+## Training
+```{r cache=TRUE}
+modelRf <- train(classe ~ ., data = subsetTraining[, !nullVars], method = "rf")
+```
+## Testing
+```{r}
+predictions <- predict(modelRf, newdata = subsetTesting[,!nullVars])
+confusionMatrix(predictions, subsetTesting$classe)
+```
+
+## Prediction
+```{r}
+predict(modelRf, testing)
+```
